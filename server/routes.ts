@@ -10,10 +10,120 @@ import {
   insertUserProfileSchema,
 } from "@shared/schema";
 import { z } from "zod";
+import { supabase } from "./db";
+import { authMiddleware, type AuthenticatedRequest } from "./middleware/auth";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Debug endpoint to check Supabase configuration
+  app.get("/api/debug/supabase", async (req, res) => {
+    try {
+      const config = {
+        supabaseUrl: process.env.SUPABASE_WEB,
+        hasServiceKey: !!process.env.SUPABASE_SERVICE_KEY,
+        frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5000',
+        nodeEnv: process.env.NODE_ENV
+      };
+      
+      console.log("Supabase config:", config);
+      res.json({ config });
+    } catch (error) {
+      console.error("Debug error:", error);
+      res.status(500).json({ error: "Debug failed" });
+    }
+  });
+
+  // Auth endpoints
+  app.post("/api/auth/magic-link", async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email) {
+        return res.status(400).json({ error: "Email is required" });
+      }
+
+      console.log("Attempting to send magic link to:", email);
+      console.log("Supabase URL:", process.env.SUPABASE_WEB);
+      console.log("Frontend URL:", process.env.FRONTEND_URL || 'http://localhost:5000');
+
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: `${process.env.FRONTEND_URL || 'http://localhost:5000'}/auth/callback`,
+        },
+      });
+
+      if (error) {
+        console.error("Magic link error:", error);
+        return res.status(400).json({ 
+          error: "Failed to send magic link", 
+          details: error.message,
+          code: error.status 
+        });
+      }
+
+      console.log("Magic link sent successfully");
+      res.json({ message: "Magic link sent to your email" });
+    } catch (error) {
+      console.error("Magic link error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/auth/verify", async (req, res) => {
+    try {
+      const { token, type } = req.body;
+      if (!token) {
+        return res.status(400).json({ error: "Token is required" });
+      }
+
+      const { data, error } = await supabase.auth.verifyOtp({
+        token_hash: token,
+        type: type || 'email',
+      });
+
+      if (error) {
+        console.error("Token verification error:", error);
+        return res.status(400).json({ error: "Invalid or expired token" });
+      }
+
+      res.json({ 
+        user: data.user,
+        session: data.session,
+        message: "Authentication successful" 
+      });
+    } catch (error) {
+      console.error("Token verification error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/auth/session", authMiddleware, async (req: AuthenticatedRequest, res) => {
+    try {
+      res.json({ 
+        user: req.user,
+        message: "Session valid" 
+      });
+    } catch (error) {
+      console.error("Session check error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.post("/api/auth/signout", async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.substring(7);
+        await supabase.auth.signOut({ token });
+      }
+      res.json({ message: "Signed out successfully" });
+    } catch (error) {
+      console.error("Sign out error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Leaders endpoints
-  app.get("/api/leaders", async (req, res) => {
+  app.get("/api/leaders", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const leaders = await storage.getAllLeaders();
       res.json(leaders);
@@ -23,7 +133,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/leaders/:id", async (req, res) => {
+  app.get("/api/leaders/:id", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const leader = await storage.getLeader(req.params.id);
       if (!leader) {
@@ -36,7 +146,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/leaders", async (req, res) => {
+  app.post("/api/leaders", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const data = insertLeaderSchema.parse(req.body);
       const leader = await storage.createLeader(data);
@@ -50,7 +160,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/leaders/:id", async (req, res) => {
+  app.patch("/api/leaders/:id", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const data = insertLeaderSchema.partial().parse(req.body);
       const leader = await storage.updateLeader(req.params.id, data);
@@ -67,7 +177,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/leaders/:id", async (req, res) => {
+  app.delete("/api/leaders/:id", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const success = await storage.deleteLeader(req.params.id);
       if (!success) {
@@ -81,7 +191,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Types endpoints
-  app.get("/api/types", async (req, res) => {
+  app.get("/api/types", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const types = await storage.getAllTypes();
       res.json(types);
@@ -91,7 +201,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/types", async (req, res) => {
+  app.post("/api/types", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const data = insertTypeSchema.parse(req.body);
       const type = await storage.createType(data);
@@ -105,7 +215,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/types/:id", async (req, res) => {
+  app.patch("/api/types/:id", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const data = insertTypeSchema.partial().parse(req.body);
       const type = await storage.updateType(req.params.id, data);
@@ -122,7 +232,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/types/:id", async (req, res) => {
+  app.delete("/api/types/:id", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const success = await storage.deleteType(req.params.id);
       if (!success) {
@@ -136,7 +246,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Points endpoints
-  app.get("/api/points", async (req, res) => {
+  app.get("/api/points", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const typesWithPoints = await storage.getAllTypesWithPoints();
       res.json(typesWithPoints);
@@ -146,7 +256,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/points", async (req, res) => {
+  app.post("/api/points", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const data = insertPointsSchema.parse(req.body);
       const points = await storage.upsertPoints(data);
@@ -161,7 +271,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Recruits endpoints
-  app.get("/api/recruits", async (req, res) => {
+  app.get("/api/recruits", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const filters: any = {};
       
@@ -186,7 +296,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/recruits/:id", async (req, res) => {
+  app.get("/api/recruits/:id", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const recruit = await storage.getRecruit(req.params.id);
       if (!recruit) {
@@ -199,7 +309,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/recruits", async (req, res) => {
+  app.post("/api/recruits", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const data = insertRecruitSchema.parse(req.body);
       const recruitData = {
@@ -217,7 +327,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/recruits/:id/status", async (req, res) => {
+  app.patch("/api/recruits/:id/status", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const { status } = req.body;
       if (!status || (status !== 'Submitted' && status !== 'Confirmed')) {
@@ -234,7 +344,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/recruits/:id", async (req, res) => {
+  app.delete("/api/recruits/:id", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const success = await storage.deleteRecruit(req.params.id);
       if (!success) {
@@ -248,13 +358,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Scorecard endpoint
-  app.get("/api/scorecard", async (req, res) => {
+  app.get("/api/scorecard", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
-      let weekStart: Date | undefined;
-      if (req.query.weekStart) {
-        weekStart = new Date(req.query.weekStart as string);
+      let dateFrom: Date | undefined;
+      let dateTo: Date | undefined;
+
+      if (req.query.dateFrom) {
+        dateFrom = new Date(req.query.dateFrom as string);
       }
-      const leaderStats = await storage.getLeaderStats(weekStart);
+      if (req.query.dateTo) {
+        dateTo = new Date(req.query.dateTo as string);
+      }
+
+      const leaderStats = await storage.getLeaderStats(dateFrom, dateTo);
       res.json(leaderStats);
     } catch (error) {
       console.error("Error fetching scorecard:", error);
@@ -262,8 +378,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Scorecard summary endpoint
+  app.get("/api/scorecard/summary", authMiddleware, async (req: AuthenticatedRequest, res) => {
+    try {
+      let dateFrom: Date | undefined;
+      let dateTo: Date | undefined;
+
+      if (req.query.dateFrom) {
+        dateFrom = new Date(req.query.dateFrom as string);
+      }
+      if (req.query.dateTo) {
+        dateTo = new Date(req.query.dateTo as string);
+      }
+
+      const summary = await storage.getScorecardSummary(dateFrom, dateTo);
+      res.json(summary);
+    } catch (error) {
+      console.error("Error fetching scorecard summary:", error);
+      res.status(500).json({ error: "Failed to fetch scorecard summary" });
+    }
+  });
+
   // Users endpoints
-  app.get("/api/users", async (req, res) => {
+  app.get("/api/users", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const users = await storage.getAllUsers();
       res.json(users);
@@ -273,7 +410,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/users", async (req, res) => {
+  app.post("/api/users", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const userData = insertUserSchema.parse(req.body);
       const user = await storage.createUser(userData);
@@ -299,7 +436,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/users/:id", async (req, res) => {
+  app.patch("/api/users/:id", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const userData = insertUserSchema.partial().parse(req.body);
       const user = await storage.updateUser(req.params.id, userData);
@@ -325,7 +462,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/users/:id", async (req, res) => {
+  app.delete("/api/users/:id", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
       const success = await storage.deleteUser(req.params.id);
       if (!success) {
@@ -338,38 +475,151 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Seed endpoint - for initial data setup
-  app.post("/api/seed", async (req, res) => {
+  // Settings endpoints
+  app.get("/api/settings", authMiddleware, async (req: AuthenticatedRequest, res) => {
     try {
-      // Check if types already exist
-      const existingTypes = await storage.getAllTypes();
-      if (existingTypes.length > 0) {
-        return res.status(200).json({ message: "Data already seeded" });
-      }
+      const competitionStart = await storage.getSetting('competition_start');
+      const competitionEnd = await storage.getSetting('competition_end');
 
-      // Create types
-      const papers = await storage.createType({ name: "Papers" });
-      const newStarter = await storage.createType({ name: "New Starter" });
-      const established = await storage.createType({ name: "Established" });
-
-      // Create points
-      await storage.upsertPoints({ typeId: papers.id, points: 2 });
-      await storage.upsertPoints({ typeId: newStarter.id, points: 10 });
-      await storage.upsertPoints({ typeId: established.id, points: 20 });
-
-      // Create sample leaders
-      await storage.createLeader({ name: "Sarah Johnson", isActive: true });
-      await storage.createLeader({ name: "Michael Chen", isActive: true });
-      await storage.createLeader({ name: "Emma Williams", isActive: true });
-      await storage.createLeader({ name: "David Brown", isActive: true });
-      await storage.createLeader({ name: "Lisa Anderson", isActive: true });
-
-      res.status(201).json({ message: "Database seeded successfully" });
+      res.json({
+        competitionStart: competitionStart?.value || null,
+        competitionEnd: competitionEnd?.value || null,
+      });
     } catch (error) {
-      console.error("Error seeding database:", error);
-      res.status(500).json({ error: "Failed to seed database" });
+      console.error("Error fetching settings:", error);
+      res.status(500).json({ error: "Failed to fetch settings" });
     }
   });
+
+  app.patch("/api/settings", authMiddleware, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { competitionStart, competitionEnd } = req.body;
+
+      if (competitionStart) {
+        await storage.upsertSetting('competition_start', competitionStart);
+      }
+      if (competitionEnd) {
+        await storage.upsertSetting('competition_end', competitionEnd);
+      }
+
+      const updatedStart = await storage.getSetting('competition_start');
+      const updatedEnd = await storage.getSetting('competition_end');
+
+      res.json({
+        competitionStart: updatedStart?.value || null,
+        competitionEnd: updatedEnd?.value || null,
+      });
+    } catch (error) {
+      console.error("Error updating settings:", error);
+      res.status(500).json({ error: "Failed to update settings" });
+    }
+  });
+
+  // User Profiles endpoints
+  app.get("/api/user-profiles", authMiddleware, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { data: profiles, error } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .order('display_name');
+
+      if (error) throw error;
+      res.json(profiles || []);
+    } catch (error) {
+      console.error("Error fetching user profiles:", error);
+      res.status(500).json({ error: "Failed to fetch user profiles" });
+    }
+  });
+
+  app.patch("/api/user-profiles/:id", authMiddleware, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { data: profile, error } = await supabase
+        .from('user_profiles')
+        .update(req.body)
+        .eq('id', req.params.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      res.json(profile);
+    } catch (error) {
+      console.error("Error updating user profile:", error);
+      res.status(500).json({ error: "Failed to update user profile" });
+    }
+  });
+
+  app.post("/api/user-profiles/:id/modules", authMiddleware, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { module } = req.body;
+      if (!module) {
+        return res.status(400).json({ error: "Module is required" });
+      }
+
+      // Get current modules and add the new one
+      const { data: currentProfile, error: fetchError } = await supabase
+        .from('user_profiles')
+        .select('modules')
+        .eq('id', req.params.id)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      const currentModules = currentProfile.modules || [];
+      if (currentModules.includes(module)) {
+        return res.status(400).json({ error: "Module already exists" });
+      }
+
+      const updatedModules = [...currentModules, module];
+
+      const { data: profile, error } = await supabase
+        .from('user_profiles')
+        .update({ modules: updatedModules })
+        .eq('id', req.params.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      res.json(profile);
+    } catch (error) {
+      console.error("Error adding module to user:", error);
+      res.status(500).json({ error: "Failed to add module to user" });
+    }
+  });
+
+  app.delete("/api/user-profiles/:id/modules", authMiddleware, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { module } = req.body;
+      if (!module) {
+        return res.status(400).json({ error: "Module is required" });
+      }
+
+      // Get current modules and remove the specified one
+      const { data: currentProfile, error: fetchError } = await supabase
+        .from('user_profiles')
+        .select('modules')
+        .eq('id', req.params.id)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      const currentModules = currentProfile.modules || [];
+      const updatedModules = currentModules.filter(m => m !== module);
+
+      const { data: profile, error } = await supabase
+        .from('user_profiles')
+        .update({ modules: updatedModules })
+        .eq('id', req.params.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      res.json(profile);
+    } catch (error) {
+      console.error("Error removing module from user:", error);
+      res.status(500).json({ error: "Failed to remove module from user" });
+    }
+  });
+
 
   const httpServer = createServer(app);
   return httpServer;

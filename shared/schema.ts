@@ -8,6 +8,7 @@ export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   email: text("email").notNull().unique(),
   role: text("role").notNull().default('hr'),
+  authUserId: varchar("auth_user_id").unique(), // Links to Supabase auth.users.id
 });
 
 export const userProfiles = pgTable("user_profiles", {
@@ -59,6 +60,14 @@ export const recruiterRecruits = pgTable("recruiter_recruits", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// Settings table for competition configuration
+export const recruiterSettings = pgTable("recruiter_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  key: text("key").notNull().unique(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ one }) => ({
   profile: one(userProfiles, {
@@ -107,6 +116,8 @@ export const recruiterRecruitsRelations = relations(recruiterRecruits, ({ one })
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
+}).extend({
+  authUserId: z.string().optional(),
 });
 
 export const insertUserProfileSchema = createInsertSchema(userProfiles).omit({
@@ -141,6 +152,11 @@ export const insertRecruitSchema = createInsertSchema(recruiterRecruits).omit({
   notes: z.string().optional(),
 });
 
+export const insertSettingsSchema = createInsertSchema(recruiterSettings).omit({
+  id: true,
+  updatedAt: true,
+});
+
 // Select types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -160,6 +176,9 @@ export type InsertPoints = z.infer<typeof insertPointsSchema>;
 export type Recruit = typeof recruiterRecruits.$inferSelect;
 export type InsertRecruit = z.infer<typeof insertRecruitSchema>;
 
+export type Settings = typeof recruiterSettings.$inferSelect;
+export type InsertSettings = z.infer<typeof insertSettingsSchema>;
+
 // Extended types with relations for frontend
 export type RecruitWithRelations = Recruit & {
   leader: Leader;
@@ -173,5 +192,22 @@ export type TypeWithPoints = RecruiterType & {
 export type LeaderWithStats = Leader & {
   totalPoints: number;
   recruitsCount: number;
-  weeklyPoints: number;
+  thisWeekPoints: number; // points in the filtered period
+  periodRecruits: number; // recruits in the current period
+  paperPoints: number;
+  newStarterPoints: number;
+  establishedPoints: number;
+  rankChange: number; // positive = moved up, negative = moved down, 0 = no change
+  previousRank?: number;
+};
+
+export type ScorecardSummary = {
+  totalCompetitionScore: number;
+  totalCompetitionScoreChange: number;
+  totalRecruits: number;
+  totalRecruitsChange: number;
+  periodStart: Date;
+  periodEnd: Date;
+  previousPeriodStart?: Date;
+  previousPeriodEnd?: Date;
 };

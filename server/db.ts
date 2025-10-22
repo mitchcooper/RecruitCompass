@@ -1,15 +1,32 @@
-import { Pool, neonConfig } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-serverless';
-import ws from "ws";
-import * as schema from "@shared/schema";
+import { createClient } from '@supabase/supabase-js';
 
-neonConfig.webSocketConstructor = ws;
-
-if (!process.env.DATABASE_URL) {
+if (!process.env.SUPABASE_WEB) {
   throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?",
+    "SUPABASE_WEB must be set. Did you forget to configure Supabase?",
   );
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-export const db = drizzle({ client: pool, schema });
+if (!process.env.SUPABASE_SERVICE_KEY) {
+  throw new Error(
+    "SUPABASE_SERVICE_KEY must be set. Did you forget to configure Supabase?",
+  );
+}
+
+// Create Supabase client with service key for backend operations
+// Using untyped client for now - can add generated types later
+export const supabase = createClient(
+  process.env.SUPABASE_WEB,
+  process.env.SUPABASE_SERVICE_KEY,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
+);
+
+// Helper function to verify JWT tokens
+export async function verifyJWT(token: string) {
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  return { user, error };
+}

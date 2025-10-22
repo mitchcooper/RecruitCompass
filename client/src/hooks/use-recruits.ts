@@ -20,12 +20,7 @@ export function useRecruits(filters?: RecruitFilters) {
   const url = queryString ? `/api/recruits?${queryString}` : "/api/recruits";
 
   return useQuery<RecruitWithRelations[]>({
-    queryKey: ["/api/recruits", filters],
-    queryFn: async () => {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error("Failed to fetch recruits");
-      return response.json();
-    },
+    queryKey: [url],
   });
 }
 

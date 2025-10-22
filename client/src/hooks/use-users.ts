@@ -43,14 +43,3 @@ export function useDeleteUser() {
   });
 }
 
-export function useSeedDatabase() {
-  return useMutation({
-    mutationFn: async () => {
-      return await apiRequest("POST", "/api/seed", undefined);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/types"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/points"] });
-    },
-  });
-}
