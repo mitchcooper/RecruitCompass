@@ -14,24 +14,6 @@ import { supabase } from "./db";
 import { authMiddleware, type AuthenticatedRequest } from "./middleware/auth";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Debug endpoint to check Supabase configuration
-  app.get("/api/debug/supabase", async (req, res) => {
-    try {
-      const config = {
-        supabaseUrl: process.env.SUPABASE_WEB,
-        hasServiceKey: !!process.env.SUPABASE_SERVICE_KEY,
-        frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5000',
-        nodeEnv: process.env.NODE_ENV
-      };
-      
-      console.log("Supabase config:", config);
-      res.json({ config });
-    } catch (error) {
-      console.error("Debug error:", error);
-      res.status(500).json({ error: "Debug failed" });
-    }
-  });
-
   // Auth endpoints
   app.post("/api/auth/magic-link", async (req, res) => {
     try {
