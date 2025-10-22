@@ -8,6 +8,16 @@ import { cn } from "@/lib/utils"
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const
 
+const SAFE_COLOR_PATTERN = new RegExp(
+  [
+    "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+    "^rgba?\\(\\s*(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\s*,\\s*(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\s*,\\s*(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)(?:\\s*,\\s*(?:0|1|0?\\.\\d+))?\\s*\\)$",
+    "^hsla?\\(\\s*(?:3[0-5]\\d|[12]?\\d?\\d)\\s*,\\s*(?:100|[1-9]?\\d)\\s*%\\s*,\\s*(?:100|[1-9]?\\d)\\s*%(?:\\s*,\\s*(?:0|1|0?\\.\\d+))?\\s*\\)$",
+    "^var\\(--[a-z0-9-]+\\)$",
+  ].join("|"),
+  "i"
+)
+
 export type ChartConfig = {
   [k in string]: {
     label?: React.ReactNode
@@ -45,11 +55,21 @@ const ChartContainer = React.forwardRef<
 >(({ id, className, children, config, ...props }, ref) => {
   const uniqueId = React.useId()
   const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`
+  const safeChartId = React.useMemo(() => {
+    const sanitize = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, "")
+    const sanitized = sanitize(chartId)
+    if (sanitized) {
+      return sanitized
+    }
+
+    const fallback = sanitize(uniqueId)
+    return fallback ? `chart-${fallback}` : "chart"
+  }, [chartId, uniqueId])
 
   return (
     <ChartContext.Provider value={{ config }}>
       <div
-        data-chart={chartId}
+        data-chart={safeChartId}
         ref={ref}
         className={cn(
           "flex aspect-video justify-center text-xs [&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-none [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-sector]:outline-none [&_.recharts-surface]:outline-none",
@@ -57,7 +77,7 @@ const ChartContainer = React.forwardRef<
         )}
         {...props}
       >
-        <ChartStyle id={chartId} config={config} />
+        <ChartStyle id={safeChartId} config={config} />
         <RechartsPrimitive.ResponsiveContainer>
           {children}
         </RechartsPrimitive.ResponsiveContainer>
@@ -76,25 +96,51 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     return null
   }
 
+  const sanitizeKey = (key: string) => {
+    const sanitized = key.replace(/[^a-z0-9-]/gi, "").toLowerCase()
+    return sanitized || undefined
+  }
+
+  const sanitizeColor = (value?: string) => {
+    if (!value) return undefined
+    const trimmed = value.trim()
+    return SAFE_COLOR_PATTERN.test(trimmed) ? trimmed : undefined
+  }
+
+  const themeStyles = Object.entries(THEMES)
+    .map(([theme, prefix]) => {
+      const declarations = colorConfig
+        .map(([key, itemConfig]) => {
+          const safeKey = sanitizeKey(key)
+          if (!safeKey) return null
+
+          const colorValue =
+            itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ||
+            itemConfig.color
+          const safeColor = sanitizeColor(colorValue)
+
+          return safeColor ? `  --color-${safeKey}: ${safeColor};` : null
+        })
+        .filter(Boolean)
+        .join("\n")
+
+      if (!declarations) {
+        return null
+      }
+
+      return `${prefix} [data-chart="${id}"] {\n${declarations}\n}`
+    })
+    .filter(Boolean)
+    .join("\n")
+
+  if (!themeStyles) {
+    return null
+  }
+
   return (
     <style
       dangerouslySetInnerHTML={{
-        __html: Object.entries(THEMES)
-          .map(
-            ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
-${colorConfig
-  .map(([key, itemConfig]) => {
-    const color =
-      itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ||
-      itemConfig.color
-    return color ? `  --color-${key}: ${color};` : null
-  })
-  .join("\n")}
-}
-`
-          )
-          .join("\n"),
+        __html: themeStyles,
       }}
     />
   )
